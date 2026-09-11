@@ -14,11 +14,13 @@ import unicodedata
 from collections import defaultdict, deque
 from pathlib import Path
 
-from mysql_store import MySQLStore
+from .mysql_store import MySQLStore
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-PUBLIC_DIR = BASE_DIR / "public"
+# Project paths, environment settings, and shared in-memory state.
+BACKEND_DIR = Path(__file__).resolve().parent
+BASE_DIR = BACKEND_DIR.parent
+DATABASE_DIR = BASE_DIR / "database"
 
 
 def load_environment_file(path: Path) -> None:
@@ -38,10 +40,14 @@ def load_environment_file(path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
-load_environment_file(BASE_DIR / ".env")
+load_environment_file(BACKEND_DIR / ".env")
 
 configured_data_file = os.environ.get("DRMS_DATA_FILE")
-DATA_FILE = Path(configured_data_file) if configured_data_file else BASE_DIR / "data" / "app_data.json"
+DATA_FILE = (
+    Path(configured_data_file)
+    if configured_data_file
+    else DATABASE_DIR / "data" / "app_data.json"
+)
 if not DATA_FILE.is_absolute():
     DATA_FILE = BASE_DIR / DATA_FILE
 SESSION_COOKIE = "drms_session"
@@ -49,7 +55,6 @@ SESSION_STORE: dict[str, dict[str, object]] = {}
 SESSION_LOCK = threading.Lock()
 DATA_LOCK = threading.Lock()
 DATA_STORE: MySQLStore | None = None
-STAFF_ACCESS_CODE = os.environ.get("DRMS_STAFF_CODE", "")
 COOKIE_SECURE = os.environ.get("DRMS_COOKIE_SECURE", "0") == "1"
 SESSION_TTL_SECONDS = 12 * 60 * 60
 REMEMBER_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -60,10 +65,10 @@ IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9]*_[A-Za-z0-9_-]{1,48}$")
 HTML_TAG_PATTERN = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
 PHONE_PATTERN = re.compile(r"^[0-9+() .-]{7,24}$")
 TOOTH_PATTERN = re.compile(r"^[0-9#,.\-\s/]{1,120}$")
-SENSITIVE_FIELDS = {"password", "staff_code"}
+SENSITIVE_FIELDS = {"password"}
 MULTILINE_FIELDS = {
     "address", "notes", "message", "body", "description", "diagnosis",
-    "prescription", "remarks",
+    "prescription", "remarks", "detail_items",
 }
 FIELD_LIMITS = {
     "id": 64,
@@ -88,7 +93,6 @@ FIELD_LIMITS = {
     "profile_image": 2_500_000,
     "password": 128,
     "role": 16,
-    "staff_code": 256,
     "remember": 8,
     "service": 120,
     "doctor": 120,
@@ -114,12 +118,18 @@ FIELD_LIMITS = {
     "status": 24,
     "title": 120,
     "description": 500,
+    "detail_tagline": 240,
+    "detail_items": 1600,
+    "detail_duration": 80,
+    "detail_audience": 80,
+    "detail_care_note": 100,
     "mark_all": 5,
     "_website": 200,
 }
 ALLOWED_PAYLOAD_FIELDS = frozenset(FIELD_LIMITS)
 
 
+# Request rate limiting shared by every API route.
 class RateLimiter:
     def __init__(self) -> None:
         self._events: dict[str, deque[float]] = defaultdict(deque)
@@ -144,6 +154,7 @@ class RateLimiter:
 
 RATE_LIMITER = RateLimiter()
 
+# Content shown before an administrator adds custom services or promotions.
 DEFAULT_SERVICES = [
     {
         "id": "svc_oral_prophylaxis",
@@ -151,54 +162,14 @@ DEFAULT_SERVICES = [
         "description": "Routine cleaning and plaque removal for healthier gums.",
     },
     {
+        "id": "svc_tooth_filling",
+        "name": "Tooth Filling",
+        "description": "Restorative filling treatment for cavities and minor tooth damage.",
+    },
+    {
         "id": "svc_extraction",
         "name": "Tooth Extraction",
         "description": "Assessment and safe tooth removal when needed.",
-    },
-    {
-        "id": "svc_dental_filling",
-        "name": "Dental Filling",
-        "description": "Tooth-colored or restorative fillings for cavities and minor damage.",
-    },
-    {
-        "id": "svc_root_canal_treatment",
-        "name": "Root Canal Treatment",
-        "description": "Treatment for infected pulp while preserving the tooth.",
-    },
-    {
-        "id": "svc_dental_crown",
-        "name": "Dental Crown",
-        "description": "Crown restoration for damaged or weakened teeth.",
-    },
-    {
-        "id": "svc_dental_bridge",
-        "name": "Dental Bridge",
-        "description": "Fixed bridge treatment for replacing missing teeth.",
-    },
-    {
-        "id": "svc_dentures",
-        "name": "Dentures",
-        "description": "Partial and complete denture services.",
-    },
-    {
-        "id": "svc_orthodontics_braces",
-        "name": "Orthodontics (Braces)",
-        "description": "Orthodontic evaluation, adjustment, and braces treatment planning.",
-    },
-    {
-        "id": "svc_teeth_whitening",
-        "name": "Teeth Whitening",
-        "description": "Cosmetic whitening options for a brighter smile.",
-    },
-    {
-        "id": "svc_dental_xray",
-        "name": "Dental X-ray",
-        "description": "Dental imaging to support diagnosis and treatment planning.",
-    },
-    {
-        "id": "svc_consultation",
-        "name": "Consultation",
-        "description": "General dental consultation and care planning.",
     },
     {
         "id": "svc_fluoride_treatment",
@@ -206,16 +177,111 @@ DEFAULT_SERVICES = [
         "description": "Preventive fluoride care for stronger tooth enamel.",
     },
     {
-        "id": "svc_dental_sealants",
-        "name": "Dental Sealants",
-        "description": "Protective sealants for cavity prevention.",
+        "id": "svc_pit_fissure_sealant",
+        "name": "Pit & Fissure Sealant",
+        "description": "Protective sealant treatment for cavity-prone grooves in the teeth.",
     },
     {
-        "id": "svc_others",
-        "name": "Others",
-        "description": "Other dental procedures and clinic services.",
+        "id": "svc_teeth_whitening",
+        "name": "Teeth Whitening",
+        "description": "Cosmetic whitening options for a brighter smile.",
+    },
+    {
+        "id": "svc_root_canal",
+        "name": "Root Canal Therapy",
+        "description": "Treatment for infected pulp while preserving the natural tooth.",
+    },
+    {
+        "id": "svc_odontectomy",
+        "name": "Odontectomy (Wisdom Tooth Removal)",
+        "description": "Surgical assessment and removal of an impacted wisdom tooth.",
+    },
+    {
+        "id": "svc_apicoectomy",
+        "name": "Apicoectomy",
+        "description": "Surgical treatment of infection around the tip of a tooth root.",
+    },
+    {
+        "id": "svc_gingivectomy",
+        "name": "Gingivectomy / Gingivoplasty (Crown Lengthening)",
+        "description": "Gum contouring or crown-lengthening treatment for oral health and restoration.",
+    },
+    {
+        "id": "svc_metal_braces",
+        "name": "Traditional Metal Braces",
+        "description": "Conventional orthodontic braces for guided tooth alignment.",
+    },
+    {
+        "id": "svc_ceramic_braces",
+        "name": "Ceramic Braces",
+        "description": "Tooth-colored orthodontic braces for a more discreet appearance.",
+    },
+    {
+        "id": "svc_sapphire_braces",
+        "name": "Sapphire Braces",
+        "description": "Clear sapphire brackets designed for discreet orthodontic treatment.",
+    },
+    {
+        "id": "svc_self_ligating_braces",
+        "name": "Self-Ligating Braces",
+        "description": "Bracket-based orthodontic treatment using self-ligating clips.",
+    },
+    {
+        "id": "svc_clear_aligners",
+        "name": "Invisible / Clear Aligners",
+        "description": "Removable clear aligners for discreet tooth straightening.",
+    },
+    {
+        "id": "svc_partial_dentures",
+        "name": "Removable Partial Dentures",
+        "description": "Removable prosthetic replacement for one or more missing teeth.",
+    },
+    {
+        "id": "svc_veneers",
+        "name": "Direct and Indirect Veneers",
+        "description": "Custom veneer options for improving tooth shape, shade, and appearance.",
+    },
+    {
+        "id": "svc_bridge_crowns",
+        "name": "Fixed Bridge / Jacket Crowns",
+        "description": "Fixed restorations for replacing missing teeth or protecting damaged teeth.",
+    },
+    {
+        "id": "svc_retainers",
+        "name": "Retainers (Hawley / Invisible)",
+        "description": "Hawley or clear retainers for maintaining tooth alignment.",
+    },
+    {
+        "id": "svc_denture_repair",
+        "name": "Denture Repair / Reline / Rebase",
+        "description": "Repair and refitting services that restore denture comfort and function.",
+    },
+    {
+        "id": "svc_space_maintainers",
+        "name": "Space Maintainers / Expanders",
+        "description": "Orthodontic appliances for preserving or creating appropriate dental space.",
     },
 ]
+
+# Remove only obsolete built-in entries. Administrator-created services remain intact.
+RETIRED_DEFAULT_SERVICE_NAMES = {
+    "braces consultation",
+    "consultation",
+    "dental bridge",
+    "dental crown",
+    "dental filling",
+    "dental sealants",
+    "dental x-ray",
+    "dentures",
+    "orthodontics (braces)",
+    "others",
+    "root canal treatment",
+    "tooth restoration",
+}
+
+DEFAULT_SERVICE_ORDER = {
+    service["name"].strip().lower(): index for index, service in enumerate(DEFAULT_SERVICES)
+}
 
 DEFAULT_PROMOS = [
     {
@@ -236,6 +302,7 @@ DEFAULT_PROMOS = [
 ]
 
 
+# Input sanitizing and field validation.
 def reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -353,6 +420,7 @@ def validate_tooth_numbers(value: object) -> str:
     return tooth_numbers
 
 
+# Date, money, patient, and treatment helpers.
 def utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
@@ -460,6 +528,7 @@ def payment_status(balance: float) -> str:
     return "completed" if balance <= 0 else "unpaid"
 
 
+# Password hashing and public-safe account data.
 def hash_password(password: str) -> str:
     iterations = 600_000
     salt = secrets.token_hex(16)
@@ -500,6 +569,7 @@ def public_user(user: dict) -> dict:
     }
 
 
+# Data defaults and the JSON/MySQL persistence adapter.
 def ensure_data_defaults(data: dict) -> bool:
     changed = False
     for key, default in (
@@ -519,26 +589,30 @@ def ensure_data_defaults(data: dict) -> bool:
         data["services"] = default_services()
         changed = True
     else:
-        existing_service_names = {
-            service.get("name", "").strip().lower() for service in data.get("services", [])
-        }
-        for service in default_services():
-            if service["name"].strip().lower() not in existing_service_names:
-                data["services"].append(service)
-                existing_service_names.add(service["name"].strip().lower())
-                changed = True
+        current_services = data.get("services", [])
+        had_retired_services = any(
+            service.get("name", "").strip().lower() in RETIRED_DEFAULT_SERVICE_NAMES
+            for service in current_services
+        )
+        data["services"] = [
+            service
+            for service in current_services
+            if service.get("name", "").strip().lower() not in RETIRED_DEFAULT_SERVICE_NAMES
+        ]
+        if len(data["services"]) != len(current_services):
+            changed = True
+        if had_retired_services:
+            existing_service_names = {
+                service.get("name", "").strip().lower() for service in data.get("services", [])
+            }
+            for service in default_services():
+                if service["name"].strip().lower() not in existing_service_names:
+                    data["services"].append(service)
+                    existing_service_names.add(service["name"].strip().lower())
+                    changed = True
     if "promos" not in data:
         data["promos"] = default_promos()
         changed = True
-    else:
-        existing_promo_titles = {
-            promo.get("title", "").strip().lower() for promo in data.get("promos", [])
-        }
-        for promo in default_promos():
-            if promo["title"].strip().lower() not in existing_promo_titles:
-                data["promos"].append(promo)
-                existing_promo_titles.add(promo["title"].strip().lower())
-                changed = True
     return changed
 
 
@@ -617,6 +691,7 @@ def save_data(data: dict) -> None:
     temp_file.replace(DATA_FILE)
 
 
+# Small lookups shared by the feature route files.
 def find_user_by_email(data: dict, email: str) -> dict | None:
     normalized = email.strip().lower()
     return next((user for user in data["users"] if user["email"] == normalized), None)

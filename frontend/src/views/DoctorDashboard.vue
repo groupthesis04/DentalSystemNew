@@ -1,0 +1,184 @@
+<script setup>
+import {
+  CalendarDays,
+  ChartNoAxesColumnIncreasing,
+  CircleUserRound,
+  LayoutDashboard,
+  ListFilter,
+  Users,
+} from "lucide-vue-next";
+import { nextTick, onMounted, ref } from "vue";
+
+import ContentManagement from "../components/doctor/ContentManagement.vue";
+import DoctorAccount from "../components/doctor/DoctorAccount.vue";
+import DoctorOverview from "../components/doctor/DoctorOverview.vue";
+import DoctorReports from "../components/doctor/DoctorReports.vue";
+import PatientManagement from "../components/doctor/PatientManagement.vue";
+import ScheduleManagement from "../components/doctor/ScheduleManagement.vue";
+import PortalHeader from "../components/PortalHeader.vue";
+import PortalSidebar from "../components/PortalSidebar.vue";
+import { useDoctorStore } from "../composables/useDoctorStore";
+import { apiRequest, refreshSession, session, signOut } from "../services/api";
+import { dashboardPath, navigate } from "../router";
+import { consumeQueuedToast, queueToast, showToast } from "../services/toast";
+
+const { state, load } = useDoctorStore();
+const activePanel = ref("doctorOverview");
+const highlightedId = ref("");
+
+const navItems = [
+  { id: "doctorOverview", label: "Overview", shortLabel: "Home", icon: LayoutDashboard },
+  { id: "doctorPatients", label: "Patients & Treatments", shortLabel: "Patients", icon: Users },
+  { id: "doctorSchedule", label: "Appointments", shortLabel: "Schedule", icon: CalendarDays },
+  { id: "doctorSettings", label: "Services & Content", shortLabel: "Services", icon: ListFilter },
+  { id: "doctorStatistics", label: "Reports", icon: ChartNoAxesColumnIncreasing },
+  { id: "doctorProfile", label: "Account", icon: CircleUserRound },
+];
+
+async function refreshData() {
+  try {
+    await load();
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function logout() {
+  try {
+    await signOut();
+    queueToast("Logged out.");
+    navigate("/");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function updateAppointmentStatus(item, status) {
+  try {
+    const data = await apiRequest("/api/appointments", {
+      method: "PATCH",
+      body: { id: item.id, status },
+    });
+    const index = state.appointments.findIndex((entry) => entry.id === item.id);
+    if (index >= 0) state.appointments.splice(index, 1, data.appointment);
+    for (const cancelledId of data.cancelled_appointment_ids || []) {
+      const cancelledIndex = state.appointments.findIndex((entry) => entry.id === cancelledId);
+      if (cancelledIndex >= 0) state.appointments[cancelledIndex].status = "cancelled";
+    }
+    showToast(`Appointment ${status === "approved" ? "accepted" : status}.`);
+    await load();
+  } catch (error) {
+    showToast(error.message, "error");
+    await refreshData();
+  }
+}
+
+async function openNotification(item) {
+  const targets = {
+    appointment: "doctorSchedule",
+    treatment: "doctorPatients",
+    feedback: "doctorSettings",
+  };
+  activePanel.value = targets[item.entity_type] || "doctorOverview";
+  highlightedId.value = item.entity_id || "";
+  await nextTick();
+  window.setTimeout(() => {
+    const target = document.querySelector(`[data-entity-id="${CSS.escape(highlightedId.value)}"]`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 100);
+  window.setTimeout(() => {
+    highlightedId.value = "";
+  }, 3200);
+}
+
+async function openReportEntity(panel, entityId) {
+  highlightedId.value = entityId || "";
+  activePanel.value = panel;
+  await nextTick();
+  window.setTimeout(() => {
+    const target = document.querySelector(`[data-entity-id="${CSS.escape(highlightedId.value)}"]`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 100);
+  window.setTimeout(() => {
+    highlightedId.value = "";
+  }, 3200);
+}
+
+onMounted(async () => {
+  document.title = "Doctor Dashboard - BORJA Dental Clinic";
+  consumeQueuedToast();
+  try {
+    const user = await refreshSession();
+    if (!user) {
+      queueToast("Please log in to continue.", "error");
+      navigate("/?login=1");
+      return;
+    }
+    if (user.role !== "doctor") {
+      navigate(dashboardPath(user.role));
+      return;
+    }
+    await load();
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+});
+</script>
+
+<template>
+  <template v-if="session.user">
+    <main class="portal-page doctor-portal">
+      <PortalSidebar
+        :user="session.user"
+        role-label="Doctor / Admin"
+        :items="navItems"
+        :active="activePanel"
+        @select="activePanel = $event"
+        @logout="logout"
+      />
+      <div class="portal-workspace">
+        <PortalHeader mode="doctor" @open-notification="openNotification" />
+        <section class="portal-main" aria-label="Doctor dashboard">
+          <div
+            v-if="state.loading && !state.patients.length && !state.appointments.length"
+            class="loading-state"
+          >
+            Loading clinic dashboard...
+          </div>
+          <DoctorOverview
+            v-else-if="activePanel === 'doctorOverview'"
+            :state="state"
+            :highlighted-id="highlightedId"
+            @select-panel="activePanel = $event"
+            @status-change="updateAppointmentStatus"
+            @refresh="refreshData"
+          />
+          <PatientManagement
+            v-else-if="activePanel === 'doctorPatients'"
+            :state="state"
+            :highlighted-id="highlightedId"
+            @refresh="refreshData"
+          />
+          <ScheduleManagement
+            v-else-if="activePanel === 'doctorSchedule'"
+            :state="state"
+            :highlighted-id="highlightedId"
+            @refresh="refreshData"
+            @status-change="updateAppointmentStatus"
+          />
+          <ContentManagement v-else-if="activePanel === 'doctorSettings'" :state="state" />
+          <DoctorReports
+            v-else-if="activePanel === 'doctorStatistics'"
+            :state="state"
+            @select-panel="activePanel = $event"
+            @open-record="openReportEntity('doctorPatients', $event)"
+            @open-appointment="openReportEntity('doctorSchedule', $event)"
+            @open-patient="openReportEntity('doctorPatients', $event)"
+          />
+          <DoctorAccount v-else />
+        </section>
+      </div>
+    </main>
+  </template>
+  <div v-else class="loading-state">Opening your dashboard...</div>
+</template>

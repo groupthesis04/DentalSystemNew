@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import json
 from http import HTTPStatus
 from ..core import (
@@ -10,7 +9,6 @@ from ..core import (
     SESSION_COOKIE,
     SESSION_LOCK,
     SESSION_STORE,
-    STAFF_ACCESS_CODE,
     find_user_by_email,
     hash_password,
     load_data,
@@ -39,21 +37,12 @@ class AuthRoutes:
             self.send_error_json(HTTPStatus.BAD_REQUEST, str(error))
             return
         role = str(payload.get("role", "patient")).strip().lower()
-
-        if role not in {"patient", "doctor"}:
-            self.send_error_json(HTTPStatus.BAD_REQUEST, "Choose a valid account type.")
+        if role != "patient":
+            self.send_error_json(
+                HTTPStatus.FORBIDDEN,
+                "The clinic administrator account already exists. New accounts must be patients.",
+            )
             return
-        if role == "doctor":
-            provided_code = str(payload.get("staff_code", ""))
-            if not STAFF_ACCESS_CODE:
-                self.send_error_json(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    "Staff registration is disabled until DRMS_STAFF_CODE is configured.",
-                )
-                return
-            if not hmac.compare_digest(provided_code, STAFF_ACCESS_CODE):
-                self.send_error_json(HTTPStatus.FORBIDDEN, "Invalid staff access code.")
-                return
 
         with DATA_LOCK:
             data = load_data()
