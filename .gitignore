@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+data/*.json
+.env
+*.sql.bak
+tmp/
+*.log
+.pytest_cache/
