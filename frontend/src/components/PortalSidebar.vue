@@ -13,7 +13,7 @@ const emit = defineEmits(["select", "logout"]);
 </script>
 
 <template>
-  <aside class="profile-sidebar" :aria-label="`${roleLabel} navigation`">
+  <aside class="profile-sidebar overview-navigation" :aria-label="`${roleLabel} navigation`">
     <button
       class="sidebar-brand"
       type="button"

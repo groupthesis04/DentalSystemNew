@@ -12,7 +12,7 @@ export async function apiRequest(path, options = {}) {
   const headers = {
     "X-Requested-With": "DentalSystem",
     ...(hasBody ? { "Content-Type": "application/json" } : {}),
-    ...(session.csrfToken && method !== "GET" ? { "X-CSRF-Token": session.csrfToken } : {}),
+    ...(session.csrfToken && method !== "GET" ? { "X-CSRFToken": session.csrfToken } : {}),
     ...(options.headers || {}),
   };
 
@@ -29,15 +29,16 @@ export async function apiRequest(path, options = {}) {
         : undefined,
     });
   } catch {
-    throw new Error(
-      "Cannot reach the server. Start the Python backend and open the local server URL.",
-    );
+    throw new Error("Cannot reach the server. Start the Django backend and try again.");
   }
 
   const data = await response.json().catch(() => ({}));
   if (data.csrf_token) session.csrfToken = data.csrf_token;
   if (!response.ok) {
-    throw new Error(data.error || "Something went wrong.");
+    const error = new Error(data.error || "Something went wrong.");
+    error.status = response.status;
+    error.data = data;
+    throw error;
   }
   return data;
 }

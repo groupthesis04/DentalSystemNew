@@ -11,6 +11,7 @@ export function useDoctorStore() {
     services: [],
     promos: [],
     availability: [],
+    analytics: null,
     clinicDoctor: "",
     loading: false,
   });
@@ -18,7 +19,7 @@ export function useDoctorStore() {
   async function load() {
     state.loading = true;
     try {
-      const [appointments, records, patients, feedback, services, promos, availability] =
+      const [appointments, records, patients, feedback, services, promos, availability, analytics] =
         await Promise.all([
           apiRequest("/api/appointments"),
           apiRequest("/api/records"),
@@ -27,6 +28,7 @@ export function useDoctorStore() {
           apiRequest("/api/services"),
           apiRequest("/api/promos"),
           apiRequest("/api/availability"),
+          apiRequest("/api/reports"),
         ]);
       state.appointments = appointments.appointments || [];
       state.records = records.records || [];
@@ -36,6 +38,7 @@ export function useDoctorStore() {
       state.promos = promos.promos || [];
       state.availability = availability.availability || [];
       state.clinicDoctor = availability.clinic_doctor || state.availability[0]?.doctor || "";
+      state.analytics = analytics;
     } finally {
       state.loading = false;
     }

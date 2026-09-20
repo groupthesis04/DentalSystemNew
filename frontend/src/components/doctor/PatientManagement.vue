@@ -49,7 +49,6 @@ const treatmentDetailOpen = ref(false);
 const selectedPatientId = ref("");
 const detailRecord = ref(null);
 const busy = ref(false);
-const selectedService = ref("");
 
 const emptyPatient = () => ({
   id: "",
@@ -177,22 +176,10 @@ const procedures = computed(() => [
     ].filter(Boolean),
   ),
 ]);
-const serviceRows = computed(() =>
-  props.state.records
-    .filter((item) => treatmentProcedure(item) === selectedService.value)
-    .sort((a, b) => String(b.treatment_date).localeCompare(String(a.treatment_date))),
-);
 const treatmentFormBalance = computed(
   () => Number(treatmentForm.amount_charged || 0) - Number(treatmentForm.amount_paid || 0),
 );
 
-watch(
-  procedures,
-  (items) => {
-    if (!items.includes(selectedService.value)) selectedService.value = items[0] || "";
-  },
-  { immediate: true },
-);
 watch(
   filteredPatients,
   (patients) => {
@@ -716,56 +703,6 @@ function viewTreatment(record) {
           </div>
         </section>
       </div>
-
-      <section class="dashboard-panel patient-services-panel">
-        <div class="panel-heading inline">
-          <div>
-            <span class="section-kicker">Dental services</span>
-            <h2>{{ selectedService || "Dental Services" }}</h2>
-          </div>
-        </div>
-        <div class="service-category-list">
-          <button
-            v-for="procedure in procedures"
-            :key="procedure"
-            :class="{ active: procedure === selectedService }"
-            type="button"
-            @click="selectedService = procedure"
-          >
-            {{ procedure }}
-          </button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Patient Name</th>
-                <th>Date</th>
-                <th>Dentist</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="record in serviceRows" :key="record.id">
-                <td>{{ record.patient_name }}</td>
-                <td>{{ formatDate(record.treatment_date) }}</td>
-                <td>{{ record.doctor_name || state.clinicDoctor || "Dentist" }}</td>
-                <td>
-                  <StatusBadge
-                    :status="
-                      record.payment_status ||
-                      (treatmentBalance(record) > 0 ? 'unpaid' : 'completed')
-                    "
-                  />
-                </td>
-              </tr>
-              <tr v-if="!serviceRows.length">
-                <td colspan="4" class="table-empty">No patients have received this service yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
     </div>
 
     <BaseModal

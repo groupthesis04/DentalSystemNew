@@ -7,12 +7,19 @@ import {
   CalendarCheck2,
   CalendarDays,
   Check,
+  CircleUserRound,
   ClipboardPlus,
   Eye,
   Gift,
   Heart,
   HeartHandshake,
+  House,
+  Info,
+  LayoutDashboard,
+  LogIn,
+  LogOut,
   MessageCircle,
+  Menu,
   MonitorSmartphone,
   Quote,
   Search,
@@ -20,7 +27,9 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Tag,
   Target,
+  UserPlus,
   UsersRound,
   X,
 } from "lucide-vue-next";
@@ -28,6 +37,7 @@ import {
 import AppointmentForm from "../components/AppointmentForm.vue";
 import AuthModal from "../components/AuthModal.vue";
 import BaseModal from "../components/BaseModal.vue";
+import BookingAuthPrompt from "../components/BookingAuthPrompt.vue";
 import { apiRequest, refreshSession, session, signOut } from "../services/api";
 import { fallbackPromos, fallbackServices, getServiceModalContent } from "../services/constants";
 import { dashboardPath, navigate } from "../router";
@@ -41,13 +51,17 @@ const availability = ref([]);
 const clinicDoctor = ref("");
 const authOpen = ref(false);
 const authTab = ref("login");
+const authRequiredOpen = ref(false);
 const activeSection = ref("home");
 const selectedPublicService = ref("");
 const selectedService = ref(null);
+const bookingOpen = ref(false);
+const mobileMenuOpen = ref(false);
 const searchOpen = ref(false);
 const searchQuery = ref("");
 const searchRoot = ref(null);
 const searchInput = ref(null);
+const mobileMenuClose = ref(null);
 const feedbackForm = reactive({ name: "", rating: "5", message: "", _website: "" });
 const feedbackBusy = ref(false);
 const showAllFeedback = ref(false);
@@ -60,6 +74,10 @@ const bookingNote = computed(() => {
     ? "Your booking will be connected to your patient account."
     : "Browsing is open to everyone. Booking requires a patient account.";
 });
+
+const publicBookingLabel = computed(() =>
+  session.user?.role === "patient" ? "Review Appointment" : "Continue Booking",
+);
 
 const promoCards = computed(() =>
   promos.value.map((promo) => ({ promo, display: promoPresentation(promo) })),
@@ -142,12 +160,68 @@ const feedbackRatingLabel = computed(() => {
   return labels[Number(feedbackForm.rating)] || "Select a rating";
 });
 
+const mobileGreeting = computed(() => {
+  const nameParts = String(session.user?.name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const firstName = nameParts[0]?.toLowerCase().startsWith("dr") ? nameParts[1] : nameParts[0];
+  return firstName ? `Hello, ${firstName}!` : "Hello!";
+});
+
 function openAuth(tab = "login") {
+  bookingOpen.value = false;
+  authRequiredOpen.value = false;
+  closeMobileMenu();
   authTab.value = tab;
   authOpen.value = true;
 }
 
+function requireBookingAuthentication() {
+  bookingOpen.value = false;
+  authRequiredOpen.value = true;
+}
+
+function continueBookingAuthentication(tab) {
+  authRequiredOpen.value = false;
+  openAuth(tab);
+}
+
+function backToAppointment() {
+  authRequiredOpen.value = false;
+  requestAnimationFrame(openBooking);
+}
+
+function reviewPendingAppointment() {
+  bookingOpen.value = false;
+  navigate("/appointment-confirmation.html");
+}
+
+function closeMobileMenu() {
+  mobileMenuOpen.value = false;
+  document.body.classList.remove("mobile-nav-open");
+}
+
+async function toggleMobileMenu() {
+  if (mobileMenuOpen.value) {
+    closeMobileMenu();
+    return;
+  }
+
+  closeSearch();
+  mobileMenuOpen.value = true;
+  document.body.classList.add("mobile-nav-open");
+  await nextTick();
+  mobileMenuClose.value?.focus();
+}
+
+function openDashboard() {
+  closeMobileMenu();
+  navigate(dashboardPath(session.user.role));
+}
+
 async function toggleSearch() {
+  if (!searchOpen.value) closeMobileMenu();
   searchOpen.value = !searchOpen.value;
   if (searchOpen.value) {
     await nextTick();
@@ -166,6 +240,7 @@ function setPopularSearch(term) {
 }
 
 function goToSection(sectionId) {
+  closeMobileMenu();
   window.location.hash = sectionId;
   document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -178,7 +253,7 @@ function selectSearchResult(result) {
     return;
   }
   if (result.kind === "booking") {
-    scrollToBooking();
+    openBooking();
     return;
   }
   goToSection(result.target);
@@ -193,7 +268,9 @@ function onDocumentPointerDown(event) {
 }
 
 function onDocumentKeydown(event) {
-  if (event.key === "Escape" && searchOpen.value) closeSearch();
+  if (event.key !== "Escape") return;
+  if (searchOpen.value) closeSearch();
+  if (mobileMenuOpen.value) closeMobileMenu();
 }
 
 function syncActiveSection() {
@@ -206,9 +283,18 @@ function scrollToBooking() {
     ?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+function openBooking() {
+  closeMobileMenu();
+  if (window.matchMedia("(max-width: 640px)").matches) {
+    bookingOpen.value = true;
+    return;
+  }
+  scrollToBooking();
+}
+
 function bookService(serviceName) {
   selectedPublicService.value = serviceName;
-  scrollToBooking();
+  openBooking();
 }
 
 function openServiceDetails(service) {
@@ -331,6 +417,7 @@ async function loadPublicData() {
 }
 
 async function logout() {
+  closeMobileMenu();
   try {
     await signOut();
     showToast("Logged out.");
@@ -340,6 +427,7 @@ async function logout() {
 }
 
 function bookingCreated() {
+  bookingOpen.value = false;
   navigate("/patient-dashboard.html");
 }
 
@@ -372,17 +460,19 @@ onMounted(async () => {
   await loadPublicData();
   const params = new URLSearchParams(window.location.search);
   if (params.get("login") === "1") openAuth("login");
+  else if (params.get("edit-booking") === "1") requestAnimationFrame(openBooking);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("hashchange", syncActiveSection);
   document.removeEventListener("pointerdown", onDocumentPointerDown);
   document.removeEventListener("keydown", onDocumentKeydown);
+  document.body.classList.remove("mobile-nav-open");
 });
 </script>
 
 <template>
-  <header class="site-header">
+  <header class="site-header" :class="{ 'mobile-menu-open': mobileMenuOpen }">
     <a class="brand" href="#home" aria-label="BORJA Dental Clinic home">
       <img class="brand-logo" src="/assets/logo.png" alt="" />
       <span><strong>BORJA</strong><small>Dental Clinic</small></span>
@@ -393,7 +483,7 @@ onBeforeUnmount(() => {
       <a :class="{ active: activeSection === 'services' }" href="#services">Services</a>
       <a :class="{ active: activeSection === 'promos' }" href="#promos">Promos</a>
       <a :class="{ active: activeSection === 'feedback' }" href="#feedback">Feedback</a>
-      <button class="nav-action" type="button" @click="scrollToBooking">Book Appointment</button>
+      <button class="nav-action" type="button" @click="openBooking">Book Appointment</button>
     </nav>
     <div class="auth-actions">
       <div ref="searchRoot" class="site-search">
@@ -515,17 +605,134 @@ onBeforeUnmount(() => {
         </button>
       </template>
       <template v-else>
-        <button
-          class="ghost-button"
-          type="button"
-          @click="navigate(dashboardPath(session.user.role))"
-        >
-          Dashboard
-        </button>
+        <button class="ghost-button" type="button" @click="openDashboard">Dashboard</button>
         <button class="danger-button" type="button" @click="logout">Log Out</button>
       </template>
     </div>
+    <button
+      class="mobile-menu-toggle"
+      type="button"
+      aria-label="Toggle navigation menu"
+      aria-controls="mobileNavigationDrawer"
+      :aria-expanded="mobileMenuOpen"
+      @click="toggleMobileMenu"
+    >
+      <Menu :size="27" aria-hidden="true" />
+    </button>
   </header>
+
+  <Teleport to="body">
+    <div
+      v-if="mobileMenuOpen"
+      class="mobile-nav-backdrop"
+      role="presentation"
+      @mousedown.self="closeMobileMenu"
+    >
+      <aside
+        id="mobileNavigationDrawer"
+        class="mobile-nav-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Website navigation"
+      >
+        <header class="mobile-drawer-header">
+          <a class="mobile-drawer-brand" href="#home" @click="closeMobileMenu">
+            <img src="/assets/logo.png" alt="" />
+            <span><strong>BORJA</strong><small>Dental Clinic</small></span>
+          </a>
+          <button
+            ref="mobileMenuClose"
+            class="mobile-drawer-close"
+            type="button"
+            aria-label="Close navigation menu"
+            @click="closeMobileMenu"
+          >
+            <X :size="27" aria-hidden="true" />
+          </button>
+        </header>
+
+        <div class="mobile-drawer-greeting">
+          <span aria-hidden="true"><CircleUserRound :size="30" /></span>
+          <div>
+            <strong>{{ mobileGreeting }}</strong>
+            <small>Take care of your smile today.</small>
+          </div>
+        </div>
+
+        <nav class="mobile-drawer-nav" aria-label="Mobile navigation">
+          <a :class="{ active: activeSection === 'home' }" href="#home" @click="closeMobileMenu">
+            <House :size="23" aria-hidden="true" />
+            <span>Home</span>
+          </a>
+          <a :class="{ active: activeSection === 'about' }" href="#about" @click="closeMobileMenu">
+            <Info :size="23" aria-hidden="true" />
+            <span>About</span>
+          </a>
+          <a
+            :class="{ active: activeSection === 'services' }"
+            href="#services"
+            @click="closeMobileMenu"
+          >
+            <Sparkles :size="23" aria-hidden="true" />
+            <span>Services</span>
+          </a>
+          <a
+            :class="{ active: activeSection === 'promos' }"
+            href="#promos"
+            @click="closeMobileMenu"
+          >
+            <Tag :size="23" aria-hidden="true" />
+            <span>Promos</span>
+          </a>
+          <a
+            :class="{ active: activeSection === 'feedback' }"
+            href="#feedback"
+            @click="closeMobileMenu"
+          >
+            <MessageCircle :size="23" aria-hidden="true" />
+            <span>Feedback</span>
+          </a>
+          <button type="button" @click="openBooking">
+            <CalendarDays :size="23" aria-hidden="true" />
+            <span>Book Appointment</span>
+          </button>
+        </nav>
+
+        <div class="mobile-drawer-account">
+          <template v-if="session.user">
+            <button type="button" @click="openDashboard">
+              <LayoutDashboard :size="23" aria-hidden="true" />
+              <span>Dashboard</span>
+            </button>
+            <button type="button" @click="logout">
+              <LogOut :size="23" aria-hidden="true" />
+              <span>Log Out</span>
+            </button>
+          </template>
+          <template v-else>
+            <button type="button" @click="openAuth('login')">
+              <LogIn :size="23" aria-hidden="true" />
+              <span>Log In</span>
+            </button>
+            <button type="button" @click="openAuth('register')">
+              <UserPlus :size="23" aria-hidden="true" />
+              <span>Create Account</span>
+            </button>
+          </template>
+        </div>
+
+        <div class="mobile-drawer-feature">
+          <div>
+            <strong>A Healthier Smile for a Happier You</strong>
+            <span>Quality care. Brighter tomorrows.</span>
+          </div>
+          <span class="mobile-drawer-tooth" aria-hidden="true">
+            <span class="service-art art-cleaning"></span>
+          </span>
+        </div>
+      </aside>
+    </div>
+  </Teleport>
 
   <main>
     <section id="home" class="hero" aria-labelledby="pageTitle">
@@ -539,7 +746,7 @@ onBeforeUnmount(() => {
             appointments, and keeping your dental records organized, all in one place.
           </p>
           <div class="hero-actions">
-            <button class="primary-button large" type="button" @click="scrollToBooking">
+            <button class="primary-button large" type="button" @click="openBooking">
               <CalendarDays :size="19" />
               Book an Appointment
               <ArrowRight :size="18" />
@@ -562,13 +769,15 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <AppointmentForm
+          retain-for-authentication
           :services="services"
           :availability="availability"
           :clinic-doctor="clinicDoctor"
           :initial-service="selectedPublicService"
-          submit-label="Book Appointment"
+          :submit-label="publicBookingLabel"
           @created="bookingCreated"
-          @login-required="openAuth('login')"
+          @authentication-required="requireBookingAuthentication"
+          @confirmation-required="reviewPendingAppointment"
         >
           <template #note>
             <p class="form-note">{{ bookingNote }}</p>
@@ -655,6 +864,19 @@ onBeforeUnmount(() => {
         </article>
       </div>
 
+      <div class="about-mobile-cta">
+        <div>
+          <h3>Let&rsquo;s keep your <span>smile healthy!</span></h3>
+          <p>Quality care. Brighter tomorrows.</p>
+        </div>
+        <button class="primary-button" type="button" @click="openBooking">
+          Book an Appointment <ArrowRight :size="18" aria-hidden="true" />
+        </button>
+        <span class="about-mobile-cta-art" aria-hidden="true">
+          <span class="service-art art-cleaning"></span>
+        </span>
+      </div>
+
       <div class="purpose-band">
         <div class="purpose-heading">
           <span class="section-kicker">Our purpose</span>
@@ -695,6 +917,7 @@ onBeforeUnmount(() => {
             We offer a wide range of dental services for patients of all ages. Our clinic uses
             modern technology to provide safe, comfortable, and high-quality care.
           </p>
+          <p class="services-mobile-tagline" aria-hidden="true">A brighter you,<br />every day.</p>
         </div>
       </div>
       <div class="services-card-grid">
@@ -717,7 +940,10 @@ onBeforeUnmount(() => {
       <div class="promos-banner">
         <div class="promos-banner-copy">
           <span class="section-kicker">Special offers</span>
-          <h2>Healthy Smiles for <span>Brighter Days</span></h2>
+          <h2>
+            Healthy Smiles
+            <span class="promo-heading-line"><span>for</span> Brighter Days</span>
+          </h2>
           <p>
             Take advantage of our current clinic promos and make quality dental care more affordable
             for you and your family.
@@ -759,7 +985,7 @@ onBeforeUnmount(() => {
             ><small>Book a visit and avail of our latest promos.</small></span
           >
         </div>
-        <button class="primary-button" type="button" @click="scrollToBooking">
+        <button class="primary-button" type="button" @click="openBooking">
           Book an Appointment <ArrowRight :size="18" />
         </button>
         <div class="promo-trust" aria-label="Promotion commitments">
@@ -907,6 +1133,36 @@ onBeforeUnmount(() => {
   </main>
 
   <BaseModal
+    v-if="bookingOpen"
+    title="Book an Appointment"
+    size-class="appointment-booking-dialog public-booking-dialog"
+    @close="bookingOpen = false"
+  >
+    <p class="public-booking-subtitle">Quick and easy scheduling</p>
+    <AppointmentForm
+      compact
+      retain-for-authentication
+      :services="services"
+      :availability="availability"
+      :clinic-doctor="clinicDoctor"
+      :initial-service="selectedPublicService"
+      :submit-label="publicBookingLabel"
+      @created="bookingCreated"
+      @authentication-required="requireBookingAuthentication"
+      @confirmation-required="reviewPendingAppointment"
+      @cancel="bookingOpen = false"
+    />
+    <p class="public-booking-note">{{ bookingNote }}</p>
+  </BaseModal>
+
+  <BookingAuthPrompt
+    v-if="authRequiredOpen"
+    @login="continueBookingAuthentication('login')"
+    @register="continueBookingAuthentication('register')"
+    @back="backToAppointment"
+  />
+
+  <BaseModal
     v-if="selectedService && selectedServiceDetails"
     :title="selectedService.name"
     eyebrow="Dental service"
@@ -915,6 +1171,10 @@ onBeforeUnmount(() => {
   >
     <div class="service-detail-layout">
       <aside class="service-detail-visual">
+        <div class="service-detail-mobile-intro">
+          <p class="service-detail-lead">{{ selectedServiceDetails.tagline }}</p>
+          <p>{{ selectedService.description }}</p>
+        </div>
         <p>Healthier smiles start with clear care.</p>
         <div class="service-detail-icon" aria-hidden="true">
           <span
@@ -983,7 +1243,7 @@ onBeforeUnmount(() => {
       <a href="#services">Services</a>
       <a href="#promos">Promos</a>
       <a href="#feedback">Feedback</a>
-      <button type="button" @click="scrollToBooking">Book Appointment</button>
+      <button type="button" @click="openBooking">Book Appointment</button>
     </nav>
     <div class="footer-contact">
       <strong>A Healthier Smile, A Happier You</strong>

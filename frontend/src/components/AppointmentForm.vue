@@ -1,8 +1,11 @@
 <script setup>
-import { computed, reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { CalendarDays, Info } from "lucide-vue-next";
 
-import { apiRequest } from "../services/api";
+import AvailabilityDatePicker from "./AvailabilityDatePicker.vue";
+import { availableSlotDates, futureOpenSlots } from "../services/availability";
+import { apiRequest, session } from "../services/api";
+import { pendingAppointmentForUser, savePendingAppointment } from "../services/pendingAppointment";
 import { validatedPayload } from "../services/validation";
 import { showToast } from "../services/toast";
 
@@ -13,22 +16,74 @@ const props = defineProps({
   initialService: { type: String, default: "" },
   submitLabel: { type: String, default: "Book Appointment" },
   compact: { type: Boolean, default: false },
+  retainForAuthentication: { type: Boolean, default: false },
 });
-const emit = defineEmits(["created", "login-required", "cancel"]);
+const emit = defineEmits(["created", "authentication-required", "confirmation-required", "cancel"]);
 
 const form = reactive({ service: "", doctor: "", date: "", time: "", notes: "", _website: "" });
 const busy = defineModel("busy", { type: Boolean, default: false });
-const dates = computed(() => [...new Set(props.availability.map((slot) => slot.date))].sort());
-const slots = computed(() =>
-  props.availability.filter((slot) => slot.date === form.date && !slot.booked),
+const currentAvailability = ref(props.availability);
+const currentClinicDoctor = ref(props.clinicDoctor);
+const refreshingAvailability = ref(false);
+let restoringDraft = false;
+const bookableSlots = computed(() =>
+  futureOpenSlots(currentAvailability.value, form.doctor || currentClinicDoctor.value),
 );
+const dates = computed(() => availableSlotDates(bookableSlots.value));
+const slots = computed(() => bookableSlots.value.filter((slot) => slot.date === form.date));
+
+function resetForm() {
+  Object.assign(form, {
+    service: "",
+    date: "",
+    time: "",
+    notes: "",
+    _website: "",
+    doctor: currentClinicDoctor.value || currentAvailability.value[0]?.doctor || "",
+  });
+}
+
+async function refreshAvailability() {
+  if (refreshingAvailability.value) return;
+  refreshingAvailability.value = true;
+  try {
+    const data = await apiRequest("/api/availability");
+    currentAvailability.value = data.availability || [];
+    currentClinicDoctor.value =
+      data.clinic_doctor || currentAvailability.value[0]?.doctor || currentClinicDoctor.value;
+    if (!form.doctor) form.doctor = currentClinicDoctor.value;
+  } catch {
+    // Keep the last successfully loaded schedule; submission is revalidated by the server.
+  } finally {
+    refreshingAvailability.value = false;
+  }
+}
+
+function restorePendingDraft() {
+  if (!props.retainForAuthentication || (session.user && session.user.role !== "patient")) return;
+  const draft = pendingAppointmentForUser(session.user?.id || "");
+  if (!draft) return;
+  restoringDraft = true;
+  Object.assign(form, draft.appointment, { _website: "" });
+  restoringDraft = false;
+}
+
+restorePendingDraft();
 
 watch(
   () => props.clinicDoctor,
   (doctor) => {
-    form.doctor = doctor || props.availability[0]?.doctor || "";
+    currentClinicDoctor.value = doctor || currentClinicDoctor.value;
+    if (!form.doctor) form.doctor = doctor || currentAvailability.value[0]?.doctor || "";
   },
   { immediate: true },
+);
+watch(
+  () => props.availability,
+  (items) => {
+    currentAvailability.value = items;
+  },
+  { deep: true },
 );
 watch(
   () => props.initialService,
@@ -39,16 +94,26 @@ watch(
 );
 watch(
   () => form.date,
-  () => {
-    form.time = "";
+  (date, previousDate) => {
+    if (!restoringDraft && date !== previousDate) form.time = "";
   },
+  { flush: "sync" },
 );
+watch(() => session.user?.id, restorePendingDraft);
 watch(
-  () => props.availability,
+  bookableSlots,
   (items) => {
-    if (!form.doctor) form.doctor = props.clinicDoctor || items[0]?.doctor || "";
-    if (form.date && !items.some((slot) => slot.date === form.date && slot.time === form.time))
+    if (!form.doctor) form.doctor = currentClinicDoctor.value || items[0]?.doctor || "";
+    if (form.date && !items.some((slot) => slot.date === form.date)) {
+      form.date = "";
       form.time = "";
+    } else if (
+      form.date &&
+      form.time &&
+      !items.some((slot) => slot.date === form.date && slot.time === form.time)
+    ) {
+      form.time = "";
+    }
   },
   { deep: true },
 );
@@ -58,20 +123,23 @@ async function submit() {
   try {
     const payload = validatedPayload({ ...form });
     if (!payload.date || !payload.time) throw new Error("Choose an available date and time.");
+    if (props.retainForAuthentication) {
+      if (session.user?.role === "doctor") {
+        throw new Error("Use a patient account to book an appointment.");
+      }
+      const draft = savePendingAppointment(payload, {
+        userId: session.user?.role === "patient" ? session.user.id : "",
+      });
+      if (session.user?.role === "patient") emit("confirmation-required", draft);
+      else emit("authentication-required", draft);
+      return;
+    }
     const data = await apiRequest("/api/appointments", { method: "POST", body: payload });
     showToast("Appointment request submitted.");
-    Object.assign(form, {
-      service: "",
-      date: "",
-      time: "",
-      notes: "",
-      _website: "",
-      doctor: props.clinicDoctor || props.availability[0]?.doctor || "",
-    });
+    resetForm();
     emit("created", data.appointment);
   } catch (error) {
-    if (/log in|authentication|session/i.test(error.message)) emit("login-required");
-    else showToast(error.message, "error");
+    showToast(error.message, "error");
   } finally {
     busy.value = false;
   }
@@ -108,13 +176,16 @@ async function submit() {
       >Clinic dentist<input v-model="form.doctor" readonly required
     /></label>
     <div class="form-grid two">
-      <label
-        >Preferred date
-        <select v-model="form.date" required>
-          <option value="">Select available date</option>
-          <option v-for="date in dates" :key="date" :value="date">{{ date }}</option>
-        </select>
-      </label>
+      <div class="appointment-date-field">
+        <span class="form-label">Preferred date</span>
+        <AvailabilityDatePicker
+          v-model="form.date"
+          :available-dates="dates"
+          placeholder="Select a date"
+          aria-label="Select a preferred appointment date"
+          @open="refreshAvailability"
+        />
+      </div>
       <label
         >Preferred time<input v-model="form.time" type="hidden" required /><span
           class="selected-time"
@@ -142,7 +213,7 @@ async function submit() {
       </div>
     </div>
     <label
-      >Notes<textarea
+      >Notes (optional)<textarea
         v-model="form.notes"
         rows="3"
         maxlength="500"
@@ -152,12 +223,14 @@ async function submit() {
     <div v-if="compact" class="crud-dialog-actions">
       <button class="secondary-button" type="button" @click="emit('cancel')">Cancel</button>
       <button class="primary-button" type="submit" :disabled="busy">
-        {{ busy ? "Submitting..." : submitLabel }}
+        <CalendarDays :size="18" aria-hidden="true" />
+        {{ busy ? (retainForAuthentication ? "Saving..." : "Submitting...") : submitLabel }}
       </button>
     </div>
     <template v-else>
       <button class="primary-button full" type="submit" :disabled="busy">
-        {{ busy ? "Submitting..." : submitLabel }}
+        <CalendarDays :size="18" aria-hidden="true" />
+        {{ busy ? (retainForAuthentication ? "Saving..." : "Submitting...") : submitLabel }}
       </button>
       <div class="booking-note">
         <Info :size="20" />
@@ -166,3 +239,14 @@ async function submit() {
     </template>
   </form>
 </template>
+
+<style scoped>
+.appointment-date-field {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+</style>

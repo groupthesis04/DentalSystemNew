@@ -26,6 +26,14 @@ import { showToast } from "../../services/toast";
 import { imageToDataUrl, validatedPayload } from "../../services/validation";
 import AvatarBadge from "../AvatarBadge.vue";
 
+const props = defineProps({
+  mode: {
+    type: String,
+    default: "doctor",
+    validator: (value) => ["doctor", "patient"].includes(value),
+  },
+});
+
 const tabs = [
   { id: "profile", label: "Profile", icon: CircleUserRound },
   { id: "security", label: "Security", icon: LockKeyhole },
@@ -46,7 +54,41 @@ const form = reactive({
   _website: "",
 });
 
-const displayName = computed(() => form.name.trim() || "Clinic administrator");
+const isPatient = computed(() => props.mode === "patient");
+const accountCopy = computed(() =>
+  isPatient.value
+    ? {
+        fallbackName: "Patient",
+        role: "Patient",
+        contactDescription: "Patient contact information",
+        roleValue: "Patient",
+        secondaryField: "Portal Access",
+        secondaryValue: "Appointments & Records",
+        accessLevel: "Patient",
+        securityDescription: "Patient account protection",
+        accountProtectionTitle: "Patient account",
+        accountProtectionNote: "Personal portal access",
+        notificationDescription: "Appointment and dental record alerts",
+        recordAlertTitle: "Dental records",
+        recordAlertNote: "Treatment record updates",
+      }
+    : {
+        fallbackName: "Clinic administrator",
+        role: "Administrator",
+        contactDescription: "Administrator contact information",
+        roleValue: "Dentist / Administrator",
+        secondaryField: "Department",
+        secondaryValue: "General Dentistry",
+        accessLevel: "Administrator",
+        securityDescription: "Administrator account protection",
+        accountProtectionTitle: "Administrator account",
+        accountProtectionNote: "New doctor accounts are disabled",
+        notificationDescription: "Clinic transaction alerts",
+        recordAlertTitle: "Patient records",
+        recordAlertNote: "New treatment transactions",
+      },
+);
+const displayName = computed(() => form.name.trim() || accountCopy.value.fallbackName);
 
 function syncForm() {
   Object.assign(form, {
@@ -121,7 +163,11 @@ async function save() {
 </script>
 
 <template>
-  <section class="workspace-panel doctor-account-page" aria-labelledby="account-title">
+  <section
+    class="workspace-panel doctor-account-page"
+    :class="{ 'patient-account-page': isPatient }"
+    aria-labelledby="account-title"
+  >
     <header class="account-page-heading">
       <div>
         <h1 id="account-title">Account</h1>
@@ -131,7 +177,7 @@ async function save() {
         <AvatarBadge :name="displayName" :image="form.profile_image" />
         <span>
           <strong>{{ displayName }}</strong>
-          <small>Administrator</small>
+          <small>{{ accountCopy.role }}</small>
         </span>
       </div>
     </header>
@@ -164,7 +210,7 @@ async function save() {
             </div>
             <div>
               <h2 id="personal-title">Personal Information</h2>
-              <p>Administrator contact information</p>
+              <p>{{ accountCopy.contactDescription }}</p>
             </div>
             <button v-if="!editing" class="account-edit-button" type="button" @click="beginEditing">
               <UserRound :size="15" aria-hidden="true" /> Edit Profile
@@ -250,14 +296,14 @@ async function save() {
                 <span>Role</span>
                 <div class="account-input-wrap readonly">
                   <ShieldCheck :size="15" aria-hidden="true" />
-                  <input value="Dentist / Administrator" disabled />
+                  <input :value="accountCopy.roleValue" disabled />
                 </div>
               </label>
               <label class="account-field">
-                <span>Department</span>
+                <span>{{ accountCopy.secondaryField }}</span>
                 <div class="account-input-wrap readonly">
                   <KeyRound :size="15" aria-hidden="true" />
-                  <input value="General Dentistry" disabled />
+                  <input :value="accountCopy.secondaryValue" disabled />
                 </div>
               </label>
             </div>
@@ -295,7 +341,7 @@ async function save() {
                   <ShieldCheck :size="17" aria-hidden="true" />
                 </span>
                 <dt>Access Level</dt>
-                <dd>Administrator</dd>
+                <dd>{{ accountCopy.accessLevel }}</dd>
               </div>
             </dl>
           </section>
@@ -344,7 +390,7 @@ async function save() {
           <div class="account-heading-icon blue"><LockKeyhole :size="19" /></div>
           <div>
             <h2>Security</h2>
-            <p>Administrator account protection</p>
+            <p>{{ accountCopy.securityDescription }}</p>
           </div>
         </header>
         <div class="account-setting-rows">
@@ -363,8 +409,8 @@ async function save() {
           <article>
             <LockKeyhole :size="19" aria-hidden="true" />
             <span
-              ><strong>Administrator account</strong
-              ><small>New doctor accounts are disabled</small></span
+              ><strong>{{ accountCopy.accountProtectionTitle }}</strong
+              ><small>{{ accountCopy.accountProtectionNote }}</small></span
             >
             <b>Protected</b>
           </article>
@@ -378,7 +424,7 @@ async function save() {
           <div class="account-heading-icon purple"><Bell :size="19" /></div>
           <div>
             <h2>Notifications</h2>
-            <p>Clinic transaction alerts</p>
+            <p>{{ accountCopy.notificationDescription }}</p>
           </div>
         </header>
         <div class="account-setting-rows">
@@ -391,7 +437,10 @@ async function save() {
           </article>
           <article>
             <UserRound :size="19" aria-hidden="true" />
-            <span><strong>Patient records</strong><small>New treatment transactions</small></span>
+            <span
+              ><strong>{{ accountCopy.recordAlertTitle }}</strong
+              ><small>{{ accountCopy.recordAlertNote }}</small></span
+            >
             <b>Enabled</b>
           </article>
         </div>

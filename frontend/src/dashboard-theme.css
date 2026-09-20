@@ -127,7 +127,7 @@ body[data-page="patient"] #app {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
 
-.portal-page .profile-sidebar {
+.portal-page > .overview-navigation {
   position: sticky;
   top: 0;
   z-index: 35;
@@ -218,7 +218,7 @@ body[data-page="patient"] #app {
   font-weight: 750;
   line-height: 1.15;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .sidebar-icon-wrap {
@@ -395,20 +395,6 @@ body[data-page="patient"] #app {
 
 .portal-page .crud-table tbody tr:hover {
   background: #f8fbff;
-}
-
-.portal-page .service-category-list button:hover,
-.portal-page .service-category-list button:focus-visible {
-  border-color: #b8ccf7;
-  background: #f0f5ff;
-  color: var(--dashboard-blue-dark);
-  outline: none;
-}
-
-.portal-page .service-category-list button.active {
-  border-color: var(--dashboard-blue-dark);
-  background: var(--dashboard-blue);
-  color: #ffffff;
 }
 
 .portal-page .status.unpaid {
@@ -1929,11 +1915,6 @@ body[data-page="patient"] #app {
   color: var(--dashboard-muted);
 }
 
-.patient-services-panel {
-  margin-top: 2px;
-  overflow: hidden;
-}
-
 @media (max-width: 1320px) {
   .patient-detail-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2539,35 +2520,6 @@ html[data-dashboard-theme="dark"]
   tbody
   tr.is-selected {
   background: #1c2735;
-}
-
-html[data-dashboard-theme="dark"]
-  body:is([data-page="doctor"], [data-page="patient"])
-  .service-category-list
-  button {
-  border-color: #3a4656;
-  background: #171f2a;
-  color: #c0cad6;
-}
-
-html[data-dashboard-theme="dark"]
-  body:is([data-page="doctor"], [data-page="patient"])
-  .portal-page
-  .service-category-list
-  button:is(:hover, :focus-visible) {
-  border-color: #5477a4;
-  background: #1c2b40;
-  color: #bfdbfe;
-}
-
-html[data-dashboard-theme="dark"]
-  body:is([data-page="doctor"], [data-page="patient"])
-  .portal-page
-  .service-category-list
-  button.active {
-  border-color: #3b82f6;
-  background: #2563eb;
-  color: #ffffff;
 }
 
 html[data-dashboard-theme="dark"]
@@ -4731,7 +4683,7 @@ html[data-dashboard-theme="dark"]
   }
 }
 
-/* Doctor account workspace */
+/* Shared doctor and patient account workspace */
 .doctor-account-page {
   display: grid;
   gap: 12px;

@@ -5,6 +5,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { session, apiRequest } from "../services/api";
 import { validatedPayload } from "../services/validation";
 import { dashboardPath, navigate } from "../router";
+import { claimPendingAppointment } from "../services/pendingAppointment";
 import { showToast } from "../services/toast";
 
 const props = defineProps({ initialTab: { type: String, default: "login" } });
@@ -25,22 +26,23 @@ const register = reactive({
   _website: "",
 });
 const passwordInput = ref(null);
-// These credentials are shown only by Vite's local development server.
+// Optional local credentials are read only in development and stay out of source control.
+const configuredTestAccounts = [
+  {
+    label: "Admin dashboard",
+    email: import.meta.env.VITE_TEST_DOCTOR_EMAIL?.trim(),
+    password: import.meta.env.VITE_TEST_DOCTOR_PASSWORD,
+    role: "doctor",
+  },
+  {
+    label: "Patient dashboard",
+    email: import.meta.env.VITE_TEST_PATIENT_EMAIL?.trim(),
+    password: import.meta.env.VITE_TEST_PATIENT_PASSWORD,
+    role: "patient",
+  },
+];
 const testAccounts = import.meta.env.DEV
-  ? [
-      {
-        label: "Admin dashboard",
-        email: "doctor@smilecare.local",
-        password: "AdminTest#2026",
-        role: "doctor",
-      },
-      {
-        label: "Patient dashboard",
-        email: "aureliacarllester@gmail.com",
-        password: "PatientTest#2026",
-        role: "patient",
-      },
-    ]
+  ? configuredTestAccounts.filter((account) => account.email && account.password)
   : [];
 
 onMounted(() => document.body.classList.add("modal-open"));
@@ -59,6 +61,26 @@ function selectTestAccount(account) {
   passwordInput.value?.focus();
 }
 
+function finishAuthentication(user, defaultMessage) {
+  let destination = dashboardPath(user.role);
+  let message = defaultMessage;
+  let messageType = "success";
+  if (user.role === "patient") {
+    const pending = claimPendingAppointment(user.id);
+    if (pending.status === "claimed") {
+      destination = "/appointment-confirmation.html";
+      message = "Your appointment details were restored.";
+    } else if (pending.status === "conflict") {
+      message = "The saved appointment belongs to a different patient account.";
+      messageType = "error";
+    }
+  }
+  showToast(message, messageType);
+  emit("authenticated", user);
+  emit("close");
+  navigate(destination);
+}
+
 async function submitLogin() {
   errorMessage.value = "";
   busy.value = true;
@@ -67,10 +89,7 @@ async function submitLogin() {
     const data = await apiRequest("/api/login", { method: "POST", body: payload });
     session.user = data.user;
     session.csrfToken = data.csrf_token || session.csrfToken;
-    showToast(`Welcome back, ${data.user.name}.`);
-    emit("authenticated", data.user);
-    emit("close");
-    navigate(dashboardPath(data.user.role));
+    finishAuthentication(data.user, `Welcome back, ${data.user.name}.`);
   } catch (error) {
     errorMessage.value = error.message;
   } finally {
@@ -86,10 +105,7 @@ async function submitRegister() {
     const data = await apiRequest("/api/register", { method: "POST", body: payload });
     session.user = data.user;
     session.csrfToken = data.csrf_token || session.csrfToken;
-    showToast("Account created successfully.");
-    emit("authenticated", data.user);
-    emit("close");
-    navigate(dashboardPath(data.user.role));
+    finishAuthentication(data.user, "Account created successfully.");
   } catch (error) {
     errorMessage.value = error.message;
   } finally {

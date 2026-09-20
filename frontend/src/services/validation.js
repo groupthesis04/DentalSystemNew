@@ -2,6 +2,7 @@ const limits = {
   id: 64,
   patient_id: 64,
   appointment_id: 64,
+  booking_token: 64,
   recipient_id: 64,
   name: 120,
   first_name: 80,

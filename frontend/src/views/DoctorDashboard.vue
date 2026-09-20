@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ChartNoAxesColumnIncreasing,
   CircleUserRound,
+  ClipboardList,
   LayoutDashboard,
   ListFilter,
   Users,
@@ -15,6 +16,7 @@ import DoctorOverview from "../components/doctor/DoctorOverview.vue";
 import DoctorReports from "../components/doctor/DoctorReports.vue";
 import PatientManagement from "../components/doctor/PatientManagement.vue";
 import ScheduleManagement from "../components/doctor/ScheduleManagement.vue";
+import ServiceRecords from "../components/doctor/ServiceRecords.vue";
 import PortalHeader from "../components/PortalHeader.vue";
 import PortalSidebar from "../components/PortalSidebar.vue";
 import { useDoctorStore } from "../composables/useDoctorStore";
@@ -27,8 +29,14 @@ const activePanel = ref("doctorOverview");
 const highlightedId = ref("");
 
 const navItems = [
-  { id: "doctorOverview", label: "Overview", shortLabel: "Home", icon: LayoutDashboard },
+  { id: "doctorOverview", label: "Overview", icon: LayoutDashboard },
   { id: "doctorPatients", label: "Patients & Treatments", shortLabel: "Patients", icon: Users },
+  {
+    id: "doctorServiceRecords",
+    label: "Service Records",
+    shortLabel: "Service Records",
+    icon: ClipboardList,
+  },
   { id: "doctorSchedule", label: "Appointments", shortLabel: "Schedule", icon: CalendarDays },
   { id: "doctorSettings", label: "Services & Content", shortLabel: "Services", icon: ListFilter },
   { id: "doctorStatistics", label: "Reports", icon: ChartNoAxesColumnIncreasing },
@@ -159,6 +167,11 @@ onMounted(async () => {
             :highlighted-id="highlightedId"
             @refresh="refreshData"
           />
+          <ServiceRecords
+            v-else-if="activePanel === 'doctorServiceRecords'"
+            :state="state"
+            :highlighted-id="highlightedId"
+          />
           <ScheduleManagement
             v-else-if="activePanel === 'doctorSchedule'"
             :state="state"
@@ -175,7 +188,7 @@ onMounted(async () => {
             @open-appointment="openReportEntity('doctorSchedule', $event)"
             @open-patient="openReportEntity('doctorPatients', $event)"
           />
-          <DoctorAccount v-else />
+          <DoctorAccount v-else mode="doctor" />
         </section>
       </div>
     </main>

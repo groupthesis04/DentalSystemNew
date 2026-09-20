@@ -1,3 +1,9 @@
+-- LEGACY REFERENCE SCHEMA
+--
+-- This script describes the pre-Django tables retained only for migration and audit
+-- purposes. The current application schema is managed by the migration files under
+-- backend/*/migrations. Do not run this file to initialize a new Django installation.
+
 CREATE DATABASE IF NOT EXISTS dental_clinic
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
